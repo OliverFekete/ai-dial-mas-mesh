@@ -11,17 +11,36 @@ from task.tools.deployment.calculations_agent_tool import CalculationsAgentTool
 from task.tools.deployment.web_search_agent_tool import WebSearchAgentTool
 from task.utils.constants import DIAL_ENDPOINT, DEPLOYMENT_NAME
 
-#TODO:
-# 1. Create ContentManagementApplication class and extend ChatCompletion
-# 2. As a tools for ContentManagementAgent you need to provide:
-#   - FileContentExtractionTool
-#   - RagTool
-#   - CalculationsAgentTool (MAS Mesh)
-#   - WebSearchAgentTool (MAS Mesh)
-# 3. Override the chat_completion method of ChatCompletion, create Choice and call ContentManagementAgent
-# ---
-# 4. Create DIALApp with deployment_name `content-managemen-agent` (the same as in the core config) and impl is instance
-#    of the ContentManagementApplication
-# 5. Add starter with DIALApp, port is 5002 (see core config)
+class ContentManagementApplication(ChatCompletion):
+    def __init__(self):
+        self._document_cache = DocumentCache.create()
+        self._tools: list[BaseTool] = [
+            FileContentExtractionTool(DIAL_ENDPOINT),
+            RagTool(DIAL_ENDPOINT, DEPLOYMENT_NAME, self._document_cache),
+            CalculationsAgentTool(DIAL_ENDPOINT),
+            WebSearchAgentTool(DIAL_ENDPOINT)
+        ]
+        self._agent: ContentManagementAgent = None
 
-raise NotImplementedError()
+    async def chat_completion(self, request: Request, response: Response):
+        if self._agent is None:
+            self._agent = ContentManagementAgent(
+                endpoint=DIAL_ENDPOINT,
+                tools=self._tools
+            )
+        choice = response.create_choice()
+        await self._agent.handle_request(
+            deployment_name=DEPLOYMENT_NAME,
+            choice=choice,
+            request=request,
+            response=response
+        )
+        response.add_choice(choice)
+
+app = DIALApp(
+    deployment_name="content-managemen-agent",
+    impl=ContentManagementApplication()
+)
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=5002)
